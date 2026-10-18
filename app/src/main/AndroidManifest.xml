@@ -12,6 +12,7 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
+    <!-- Family Help is wss-only (Cloudflare edge TLS); no cleartext host is ever baked. -->
     <application
         android:allowBackup="false"
         android:icon="@mipmap/ic_launcher"
@@ -19,7 +20,6 @@
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:theme="@style/Theme.AdbProxy"
-        <!-- Family Help is wss-only (Cloudflare edge TLS); no cleartext host is ever baked. -->
         android:usesCleartextTraffic="false">
         <activity
             android:name=".MainActivity"
