@@ -22,10 +22,6 @@ import okhttp3.WebSocket
 import okhttp3.WebSocketListener
 import okio.ByteString.Companion.toByteString
 import org.json.JSONObject
-import java.net.InetSocketAddress
-import java.net.Socket
-import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
@@ -42,8 +38,9 @@ class AdbProxyService : Service() {
         .build()
 
     private val io: ExecutorService = Executors.newCachedThreadPool()
-    /** Serializes mux parse + frame handling so DATA writes stay in order (thread pool was reordering). */
-    private val muxExecutor: ExecutorService =
+    /** Serializes mux parse + frame handling so DATA writes stay in order (thread pool was reordering).
+     * Recreated in onStartCommand: shutdownNow() in shutdown() breaks reuse across Stop → Get help. */
+    private var muxExecutor: ExecutorService =
         Executors.newSingleThreadExecutor { r -> Thread(r, "adb-proxy-mux") }
     private val mainHandler = Handler(Looper.getMainLooper())
 
@@ -56,10 +53,10 @@ class AdbProxyService : Service() {
     /** Prevents double handling when both onFailure and onClosed fire. */
     private val socketDeathHandling = AtomicBoolean(false)
 
+    /** Pair-then-connect state: parked dial sockets, DIAL/DIAL_RESULT, channelId routing. */
+    private lateinit var session: SessionController
+
     private val muxStream = java.io.ByteArrayOutputStream()
-    private val channels = ConcurrentHashMap<Int, Socket>()
-    /** DATA can arrive in the same WS batch before OPEN’s TCP connect finishes; buffer until then. */
-    private val pendingWrites = ConcurrentHashMap<Int, ConcurrentLinkedQueue<ByteArray>>()
 
     private var reconnectAttempt = 0
 
@@ -81,14 +78,16 @@ class AdbProxyService : Service() {
         if (running.get()) {
             return START_STICKY
         }
-        val cfg = Prefs.load(this)
+        val cfg = Prefs.load()
         createNotificationChannel()
         val notification = buildNotification(
-            cfg.relayUrl.trim().ifEmpty { getString(R.string.notification_title) },
+            getString(R.string.notification_title),
             reconnecting = false,
         )
         // Avoid android:foregroundServiceType="connectedDevice" unless the app matches Android 14’s
         // checks for that type (USB/BT/NFC hardware paths). This tunnel is network-only; wrong type → crash.
+        // The FGS must be up BEFORE the checklist sends her to Developer options — Android 11 freezes
+        // background work on the wireless-debugging pair screen (server plan §6).
         startForeground(NOTIFICATION_ID, notification)
         if (cfg.relayUrl.isBlank() || cfg.token.isBlank()) {
             toast(getString(R.string.error_service_missing_required))
@@ -96,6 +95,8 @@ class AdbProxyService : Service() {
             stopSelf()
             return START_NOT_STICKY
         }
+        session = SessionController(ConnectivityTargetSelector(applicationContext), ::sendMuxFrame)
+        muxExecutor = Executors.newSingleThreadExecutor { r -> Thread(r, "adb-proxy-mux") }
         running.set(true)
         reconnectAttempt = 0
         ProxyRuntime.connected = false
@@ -118,14 +119,9 @@ class AdbProxyService : Service() {
         webSocket = null
         muxExecutor.shutdownNow()
         muxStream.reset()
-        for (s in channels.values) {
-            try {
-                s.close()
-            } catch (_: Exception) {
-            }
+        if (::session.isInitialized) {
+            session.closeAll()
         }
-        channels.clear()
-        pendingWrites.clear()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
             stopForeground(STOP_FOREGROUND_REMOVE)
         } else {
@@ -136,6 +132,7 @@ class AdbProxyService : Service() {
             ProxyRuntime.connected = false
             ProxyRuntime.connecting = false
             ProxyRuntime.disconnecting = false
+            ProxyRuntime.phase = ProxyRuntime.PHASE_IDLE
         }
     }
 
@@ -143,7 +140,7 @@ class AdbProxyService : Service() {
         if (!running.get()) {
             return
         }
-        val cfg = Prefs.load(this)
+        val cfg = Prefs.load()
         if (cfg.relayUrl.isBlank() || cfg.token.isBlank()) {
             mainHandler.post {
                 ProxyRuntime.connecting = false
@@ -156,7 +153,7 @@ class AdbProxyService : Service() {
         }
         Log.i(
             TAG,
-            "connectWebSocket attempt=${reconnectAttempt + 1} relay=${cfg.relayUrl.trim().substringBefore("?")} adbd=${cfg.resolvedAdbdHost()}:${cfg.resolvedAdbdPort()}",
+            "connectWebSocket attempt=${reconnectAttempt + 1} relay=${cfg.relayUrl.trim().substringBefore("?")}",
         )
         val req = Request.Builder().url(cfg.relayUrl.trim()).build()
         try {
@@ -253,16 +250,9 @@ class AdbProxyService : Service() {
             muxExecutor.execute {
                 try {
                     muxStream.reset()
-                    val ids = channels.keys.toList()
-                    for (id in ids) {
-                        channels.remove(id)?.let { s ->
-                            try {
-                                s.close()
-                            } catch (_: Exception) {
-                            }
-                        }
+                    if (::session.isInitialized) {
+                        session.closeAll()
                     }
-                    pendingWrites.clear()
                 } finally {
                     mainHandler.post {
                         socketDeathHandling.set(false)
@@ -309,44 +299,54 @@ class AdbProxyService : Service() {
         mgr.notify(NOTIFICATION_ID, buildNotification(url, reconnecting))
     }
 
+    private fun sendMuxFrame(type: Int, channelId: Int, payload: ByteArray = ByteArray(0)) {
+        val ws = webSocket ?: return
+        val encoded = MuxCodec.encode(type, channelId, payload)
+        synchronized(ws) {
+            ws.send(encoded.toByteString())
+        }
+    }
+
     private fun handleMuxFrame(cfg: Prefs.Config, ws: WebSocket, frame: MuxCodec.Frame) {
         when (frame.type) {
+            MuxCodec.TYPE_DIAL -> {
+                // Dev bridge asks the phone to open TCP to adbd's pair/connect listener.
+                // The phone chooses the address; the frame carries only phase and port.
+                if (!::session.isInitialized) {
+                    return
+                }
+                session.handleDial(frame.payload)
+                val dial = (DialProto.parseDial(frame.payload) as? DialProto.DialParse.Ok)?.dial
+                if (dial != null) {
+                    mainHandler.post {
+                        ProxyRuntime.phase = dial.phase
+                    }
+                }
+            }
             MuxCodec.TYPE_OPEN -> {
                 val id = frame.channelId
                 if (id == 0) {
                     return
                 }
-                pendingWrites.remove(id)
-                channels.remove(id)?.let { old ->
-                    try {
-                        old.close()
-                    } catch (_: Exception) {
-                    }
+                if (!::session.isInitialized) {
+                    return
                 }
-                val queue = ConcurrentLinkedQueue<ByteArray>()
-                pendingWrites[id] = queue
+                val attached = session.attach(id)
+                if (!attached) {
+                    // Unsolicited OPEN: nothing parked. no_addr result (none was sent for this
+                    // channel yet) plus CLOSE, and connect nowhere (server plan §5).
+                    Log.w(TAG, "open channelId=$id nothing parked")
+                    sendMuxFrame(MuxCodec.TYPE_DIAL_RESULT, 0, DialProto.buildDialResult("", false, null, DialProto.ERROR_NO_ADDR))
+                    sendMuxFrame(MuxCodec.TYPE_CLOSE, id)
+                    return
+                }
+                val sock = session.socketFor(id) ?: return
                 io.execute {
                     if (!running.get()) {
-                        pendingWrites.remove(id)
+                        session.closeChannel(id)
                         return@execute
                     }
                     try {
-                        val sock = Socket()
-                        sock.tcpNoDelay = true
-                        sock.connect(
-                            InetSocketAddress(cfg.resolvedAdbdHost(), cfg.resolvedAdbdPort()),
-                            20_000,
-                        )
-                        channels[id] = sock
-                        synchronized(sock) {
-                            val out = sock.getOutputStream()
-                            while (true) {
-                                val b = queue.poll() ?: break
-                                out.write(b)
-                            }
-                            out.flush()
-                        }
-                        pendingWrites.remove(id)
                         val input = sock.getInputStream()
                         val buf = ByteArray(16 * 1024)
                         readLoop@ while (running.get() && !sock.isClosed) {
@@ -358,41 +358,20 @@ class AdbProxyService : Service() {
                                 continue
                             }
                             val payload = if (n == buf.size) buf else buf.copyOf(n)
-                            val encoded = MuxCodec.encode(MuxCodec.TYPE_DATA, id, payload)
+                            // Cap a single payload at 1 MiB so one frame fits the relay's WS
+                            // message limit; reads are already ≤16 KiB here.
                             val sent = synchronized(ws) {
-                                ws.send(encoded.toByteString())
+                                ws.send(MuxCodec.encode(MuxCodec.TYPE_DATA, id, payload).toByteString())
                             }
                             if (!sent) {
                                 break@readLoop
                             }
                         }
-                    } catch (e: Exception) {
-                        pendingWrites.remove(id)
-                        mainHandler.post {
-                            val p = cfg.resolvedAdbdPort()
-                            val h = cfg.resolvedAdbdHost()
-                            toast(
-                                getString(
-                                    R.string.error_adbd_connect,
-                                    h,
-                                    p,
-                                    e.message ?: e.javaClass.simpleName,
-                                ),
-                            )
-                        }
+                    } catch (_: Exception) {
                     } finally {
-                        pendingWrites.remove(id)
-                        channels.remove(id)?.let { s ->
-                            try {
-                                s.close()
-                            } catch (_: Exception) {
-                            }
-                        }
+                        session.closeChannel(id)
                         if (running.get()) {
-                            val closeFrame = MuxCodec.encode(MuxCodec.TYPE_CLOSE, id)
-                            synchronized(ws) {
-                                ws.send(closeFrame.toByteString())
-                            }
+                            sendMuxFrame(MuxCodec.TYPE_CLOSE, id)
                         }
                     }
                 }
@@ -402,44 +381,35 @@ class AdbProxyService : Service() {
                 if (frame.payload.isEmpty()) {
                     return
                 }
-                val sock = channels[cid]
-                if (sock != null && !sock.isClosed) {
-                    try {
-                        synchronized(sock) {
-                            sock.getOutputStream().write(frame.payload)
-                        }
-                    } catch (_: Exception) {
-                        channels.remove(cid)?.let { s ->
-                            try {
-                                s.close()
-                            } catch (_: Exception) {
-                            }
-                        }
-                        val closeFrame = MuxCodec.encode(MuxCodec.TYPE_CLOSE, cid)
-                        synchronized(ws) {
-                            ws.send(closeFrame.toByteString())
-                        }
+                if (!::session.isInitialized) {
+                    return
+                }
+                val sock = session.socketFor(cid)
+                if (sock == null || sock.isClosed) {
+                    // DATA with no attached channel is a protocol anomaly; drop, don't buffer.
+                    Log.w(TAG, "data channelId=$cid no socket; dropped")
+                    return
+                }
+                try {
+                    synchronized(sock) {
+                        sock.getOutputStream().write(frame.payload)
+                        sock.getOutputStream().flush()
                     }
-                } else {
-                    pendingWrites[cid]?.offer(frame.payload.copyOf())
+                } catch (_: Exception) {
+                    session.closeChannel(cid)
+                    sendMuxFrame(MuxCodec.TYPE_CLOSE, cid)
                 }
             }
             MuxCodec.TYPE_CLOSE -> {
-                pendingWrites.remove(frame.channelId)
-                val sock = channels.remove(frame.channelId)
-                if (sock != null) {
-                    io.execute {
-                        try {
-                            sock.close()
-                        } catch (_: Exception) {
-                        }
-                    }
+                if (!::session.isInitialized) {
+                    return
                 }
+                session.closeChannel(frame.channelId)
             }
         }
     }
 
-    /** Same text as Toast — capture with `adb logcat -s AdbProxy:I`. */
+    /** Same text as Toast — capture with `adb logcat -s VoicePipe:I`. */
     private fun toast(msg: String) {
         Log.i(TAG, msg)
         Toast.makeText(applicationContext, msg, Toast.LENGTH_LONG).show()
@@ -491,12 +461,14 @@ class AdbProxyService : Service() {
 
     companion object {
         const val ACTION_STOP = "org.androidgradletools.adbrelayandroid.action.STOP"
-        private const val TAG = "AdbProxy"
+        /** Server plan §4: the operator watches this tag (`adb logcat -s VoicePipe`); via= only, never an address. */
+        private const val TAG = "VoicePipe"
         private const val CHANNEL_ID = "adb_proxy_tunnel"
         private const val NOTIFICATION_ID = 1001
 
         private const val CONNECT_TIMEOUT_SEC = 30L
-        private const val PING_INTERVAL_SEC = 15L
+        /** Server plan §6: client ping every 20 s from app and bridge alike. */
+        private const val PING_INTERVAL_SEC = 20L
 
         private const val INITIAL_RECONNECT_DELAY_MS = 1_000L
         private const val BACKOFF_BASE_MS = 2_000L

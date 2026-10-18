@@ -22,6 +22,12 @@ import com.google.android.material.color.MaterialColors
 import com.google.android.material.snackbar.Snackbar
 import kotlin.math.max
 
+/**
+ * Family Help shell: a fixed checklist (no URL/token fields — those are baked into the APK)
+ * plus one big Get help button. Mum taps Get help **before** she opens Developer options so
+ * the foreground service is running when she reaches the wireless-debugging pair screen
+ * (Android 11 freezes background work there — server plan §6).
+ */
 class MainActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityMainBinding
@@ -57,52 +63,33 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        val cfg = Prefs.load(this)
-        binding.inputRelayUrl.setText(cfg.relayUrl)
-        binding.inputToken.setText(cfg.token)
-        binding.inputAdbdHost.setText(cfg.adbdHost)
-        binding.inputAdbdPort.setText(cfg.adbdPort.toString())
-        binding.textAdbdGuide.text = getString(
-            R.string.adbd_guide_steps,
-            Prefs.DEFAULT_ADBD_HOST,
-            Prefs.DEFAULT_ADBD_PORT,
-        )
-        binding.buttonOpenWirelessDebugging.setOnClickListener {
-            openWirelessDebuggingSettings()
-        }
-
-        binding.buttonConnect.setOnClickListener {
+        binding.buttonGetHelp.setOnClickListener {
             if (ProxyRuntime.connecting || ProxyRuntime.disconnecting || ProxyRuntime.connected) {
                 return@setOnClickListener
             }
-            val c = validateAndBuildConfig()
-            if (c == null) {
-                Snackbar.make(
-                    binding.rootCoordinator,
-                    getString(R.string.error_connect_fix_fields),
-                    Snackbar.LENGTH_LONG,
-                ).show()
-                return@setOnClickListener
-            }
-            Prefs.save(this, c)
             ProxyRuntime.connecting = true
             ProxyRuntime.lastError = null
+            ProxyRuntime.phase = ProxyRuntime.PHASE_IDLE
             refreshStatus()
             scheduleStatusPollIfNeeded()
             AdbProxyService.start(this)
         }
-        binding.buttonDisconnect.setOnClickListener {
+        binding.buttonStop.setOnClickListener {
             if (ProxyRuntime.disconnecting) {
                 return@setOnClickListener
             }
-            // Allow cancel while handshake is still in progress (connected was false → button did nothing).
             if (!ProxyRuntime.connecting && !ProxyRuntime.connected) {
                 return@setOnClickListener
             }
             ProxyRuntime.disconnecting = true
             refreshStatus()
             scheduleStatusPollIfNeeded()
+            // Explicit tap: the service sends close 1000 reason "stop", which stops the UK
+            // bridge from reconnecting (server plan §6).
             AdbProxyService.stop(this)
+        }
+        binding.buttonOpenWirelessDebugging.setOnClickListener {
+            openWirelessDebuggingSettings()
         }
 
         refreshStatus()
@@ -166,65 +153,6 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun clearConnectFieldErrors() {
-        binding.inputLayoutRelayUrl.error = null
-        binding.inputLayoutToken.error = null
-        binding.inputLayoutAdbdHost.error = null
-        binding.inputLayoutAdbdPort.error = null
-    }
-
-    /** Returns config when valid; sets TextInputLayout errors otherwise. */
-    private fun validateAndBuildConfig(): Prefs.Config? {
-        clearConnectFieldErrors()
-        var ok = true
-
-        val relayUrl = binding.inputRelayUrl.text?.toString()?.trim().orEmpty()
-        if (relayUrl.isEmpty()) {
-            binding.inputLayoutRelayUrl.error = getString(R.string.error_relay_required)
-            ok = false
-        } else if (!RelayUrl.isValid(relayUrl)) {
-            binding.inputLayoutRelayUrl.error = getString(R.string.error_relay_invalid)
-            ok = false
-        }
-
-        val token = binding.inputToken.text?.toString().orEmpty()
-        if (token.isBlank()) {
-            binding.inputLayoutToken.error = getString(R.string.error_token_required)
-            ok = false
-        }
-
-        val adbdHost = binding.inputAdbdHost.text?.toString()?.trim().orEmpty()
-        if (adbdHost.isEmpty()) {
-            binding.inputLayoutAdbdHost.error = getString(R.string.error_adbd_host_required)
-            ok = false
-        }
-
-        val portStr = binding.inputAdbdPort.text?.toString()?.trim().orEmpty()
-        val port = if (portStr.isEmpty()) {
-            binding.inputLayoutAdbdPort.error = getString(R.string.error_adbd_port_required)
-            ok = false
-            Prefs.DEFAULT_ADBD_PORT
-        } else {
-            val p = portStr.toIntOrNull()
-            if (p == null || p !in 1..65535) {
-                binding.inputLayoutAdbdPort.error = getString(R.string.error_port_invalid)
-                ok = false
-                Prefs.DEFAULT_ADBD_PORT
-            } else {
-                p
-            }
-        }
-
-        if (!ok) return null
-
-        return Prefs.Config(
-            relayUrl = relayUrl,
-            token = token,
-            adbdHost = adbdHost,
-            adbdPort = port,
-        )
-    }
-
     private fun scheduleStatusPollIfNeeded() {
         binding.root.removeCallbacks(statusPollRunnable)
         if (ProxyRuntime.connecting || ProxyRuntime.disconnecting) {
@@ -242,16 +170,19 @@ class MainActivity : AppCompatActivity() {
         val busy = connecting || disconnecting
         binding.progressStatus.visibility = if (busy) View.VISIBLE else View.GONE
         binding.imageStatus.visibility = if (busy) View.INVISIBLE else View.VISIBLE
-        binding.buttonConnect.isEnabled = !busy && !connected
+        binding.buttonGetHelp.isEnabled = !busy && !connected
         // Stop is allowed while the handshake runs (connecting); `busy` would wrongly disable it.
-        binding.buttonDisconnect.isEnabled = !disconnecting && (connecting || connected)
+        binding.buttonStop.isEnabled = !disconnecting && (connecting || connected)
+        binding.buttonOpenWirelessDebugging.isEnabled = true
 
-        val fieldsEnabled = !busy && !connected
-        binding.inputLayoutRelayUrl.isEnabled = fieldsEnabled
-        binding.inputLayoutToken.isEnabled = fieldsEnabled
-        binding.inputLayoutAdbdHost.isEnabled = fieldsEnabled
-        binding.inputLayoutAdbdPort.isEnabled = fieldsEnabled
-        binding.buttonOpenWirelessDebugging.isEnabled = fieldsEnabled
+        // Phase line: pair / connect step, so she can match it to the checklist card she is on.
+        val phase = ProxyRuntime.phase
+        binding.textPhase.visibility = if (connected && phase != ProxyRuntime.PHASE_IDLE) View.VISIBLE else View.GONE
+        binding.textPhase.text = when (phase) {
+            ProxyRuntime.PHASE_PAIR -> getString(R.string.status_phase_pair)
+            ProxyRuntime.PHASE_CONNECT -> getString(R.string.status_phase_connect)
+            else -> ""
+        }
 
         if (busy) {
             binding.progressStatus.indeterminateTintList = ColorStateList.valueOf(
@@ -264,8 +195,6 @@ class MainActivity : AppCompatActivity() {
 
         when {
             disconnecting -> {
-                binding.textPcHint.visibility = View.GONE
-                binding.progressStatus.contentDescription = getString(R.string.status_disconnecting_title)
                 binding.imageStatus.contentDescription = getString(R.string.status_disconnecting_title)
                 ImageViewCompat.setImageTintList(
                     binding.imageStatus,
@@ -288,8 +217,6 @@ class MainActivity : AppCompatActivity() {
                 binding.cardStatus.strokeWidth = 0
             }
             connecting -> {
-                binding.textPcHint.visibility = View.GONE
-                binding.progressStatus.contentDescription = getString(R.string.status_connecting_title)
                 binding.imageStatus.contentDescription = getString(R.string.status_connecting_title)
                 ImageViewCompat.setImageTintList(
                     binding.imageStatus,
@@ -312,7 +239,6 @@ class MainActivity : AppCompatActivity() {
                 binding.cardStatus.strokeWidth = 0
             }
             connected -> {
-                binding.textPcHint.visibility = View.VISIBLE
                 binding.imageStatus.setImageResource(R.drawable.ic_status_connected)
                 binding.imageStatus.contentDescription = getString(R.string.status_connected_title)
                 ImageViewCompat.setImageTintList(
@@ -334,7 +260,6 @@ class MainActivity : AppCompatActivity() {
                 binding.cardStatus.strokeWidth = 0
             }
             err != null -> {
-                binding.textPcHint.visibility = View.GONE
                 binding.imageStatus.setImageResource(R.drawable.ic_status_error)
                 binding.imageStatus.contentDescription = getString(R.string.status_problem_title)
                 ImageViewCompat.setImageTintList(
@@ -357,7 +282,6 @@ class MainActivity : AppCompatActivity() {
                 binding.cardStatus.strokeWidth = 0
             }
             else -> {
-                binding.textPcHint.visibility = View.GONE
                 binding.imageStatus.setImageResource(R.drawable.ic_status_standby)
                 binding.imageStatus.contentDescription = getString(R.string.status_standby_title)
                 ImageViewCompat.setImageTintList(

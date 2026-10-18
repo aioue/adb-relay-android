@@ -2,6 +2,27 @@
 
 Small Android app that acts as the **`device`** side of the remote ADB bridge: it opens an outbound WebSocket to your relay, completes the JSON handshake, then demultiplexes **ADBM** frames to a TCP connection toward `adbd` (same contract as `tools/remote-adb-relay/agent.cjs` in the `android-ide-extension` repo).
 
+> **This fork (`family-help` branch) is the mum's-phone build.** Upstream `main` dials a
+> preconfigured adbd address on `OPEN` and takes URL/token from UI fields. This branch adds
+> **pair-then-connect** (mux types 3/4) and a fixed checklist UI, and never ships upstream
+> `apk/adb-relay.apk` — build from this source only. Normative protocol:
+> homelab `docs/mum-phone/plan-voice-pipe-server.md` §4–§5.
+
+## Fork deltas from upstream main
+
+| Area | Upstream | This branch |
+| --- | --- | --- |
+| DIAL (mux type 3) | — | Dev bridge asks the phone to open TCP to adbd's pair/connect listener; phone picks Wi-Fi link addrs first, then `127.0.0.1` (1.5 s per attempt, 5 s budget) |
+| DIAL_RESULT (mux type 4) | — | `{"op":"dial","phase":…,"ok":…,"via":"link\|loopback"}` or `error":"refused\|timeout\|bad_port\|no_addr"` — never an address, never the pairing code |
+| OPEN | Dials adbd host/port directly | Attaches the **parked** socket from the matching DIAL (FIFO); unsolicited OPEN → `no_addr` result + CLOSE |
+| URL / token | Typed into UI, EncryptedSharedPreferences | Baked via `BuildConfig` (`-Pfamilyhelp.relayUrl=… -Pfamilyhelp.relayToken=…`); no input fields |
+| UI | Relay fields + status | Family Help checklist (battery → developer options → wireless debugging → stay on pair screen), large type, Get help / Stop |
+| Log tag | `AdbProxy` | `VoicePipe` (`adb logcat -s VoicePipe`); logs `via=` only, never an address |
+| Ping | 15 s | 20 s (server plan §6: both clients) |
+| App id | `org.androidgradletools.adbrelayandroid` | `net.aioue.familyhelp` |
+| Cleartext | allowed for LAN `ws://` | disabled — wss-only (Cloudflare edge TLS) |
+| mux validation | unknown types tolerated at parse | unknown types / channelId violations are a hard parse error (close WebSocket) |
+
 ## Requirements
 
 - **JDK 11** (Gradle 7.6 + Android Gradle Plugin 7.4)
@@ -13,10 +34,20 @@ Small Android app that acts as the **`device`** side of the remote ADB bridge: i
 ```bash
 export JAVA_HOME=/path/to/jdk-11
 export ANDROID_HOME=$HOME/Library/Android/sdk   # example on macOS
-./gradlew assembleDebug
+./gradlew testDebugUnitTest          # mux/DIAL protocol tests (§12 row 1)
+./gradlew assembleRelease \
+  -Pfamilyhelp.relayUrl=wss://<tunnel-hostname>/ws \
+  -Pfamilyhelp.relayToken=<device-token>
 ```
 
-Debug APK: `app/build/outputs/apk/debug/app-debug.apk`.
+Debug APK: `app/build/outputs/apk/debug/app-debug.apk` (placeholder URL — rehearsal only).
+Release APK: `app/build/outputs/apk/release/app-release-unsigned.apk` — sign, record SHA-256,
+deliver via Signal (server plan §14.2). `minifyEnabled` stays false for the mum build.
+abiFilters: arm64-v8a (A70), armeabi-v7a spare.
+
+Pre-call gate: the **same APK** must be installed on the Pixel for the mobile-data rehearsal
+before it is sent to the A70 (server plan §12 row 10). The unbaked defaults
+(`wss://NOT-BAKED.invalid/ws`) are deliberately invalid so an unbaked build fails visibly.
 
 UI is **Material 3** with **edge-to-edge** (transparent system bars, window insets on toolbar and content) and **day/night** color schemes.
 

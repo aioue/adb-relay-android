@@ -1,249 +1,252 @@
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<androidx.coordinatorlayout.widget.CoordinatorLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
-    xmlns:tools="http://schemas.android.com/tools"
-    android:id="@+id/rootCoordinator"
+    android:id="@+id/root_coordinator"
     android:layout_width="match_parent"
-    android:layout_height="match_parent"
-    android:background="?attr/colorSurface"
-    android:orientation="vertical">
+    android:layout_height="match_parent">
 
-    <com.google.android.material.appbar.MaterialToolbar
-        android:id="@+id/toolbar"
+    <com.google.android.material.appbar.AppBarLayout
+        android:id="@+id/app_bar"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:background="?attr/colorSurface"
-        android:minHeight="?attr/actionBarSize"
-        app:title="@string/activity_main_title" />
+        android:background="@android:color/transparent"
+        app:elevation="0dp">
+
+        <com.google.android.material.appbar.MaterialToolbar
+            android:id="@+id/toolbar"
+            android:layout_width="match_parent"
+            android:layout_height="?attr/actionBarSize"
+            app:title="@string/activity_main_title" />
+    </com.google.android.material.appbar.AppBarLayout>
 
     <androidx.core.widget.NestedScrollView
-        android:id="@+id/scrollMain"
+        android:id="@+id/scroll_main"
         android:layout_width="match_parent"
-        android:layout_height="0dp"
-        android:layout_weight="1"
+        android:layout_height="match_parent"
         android:clipToPadding="false"
-        android:fillViewport="true"
-        android:scrollbars="none">
+        app:layout_behavior="@string/appbar_scrolling_view_behavior">
 
         <LinearLayout
-            android:id="@+id/contentInner"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="vertical"
-            android:paddingHorizontal="@dimen/screen_horizontal_padding"
-            android:paddingTop="12dp"
-            android:paddingBottom="24dp">
+            android:paddingStart="@dimen/screen_horizontal_padding"
+            android:paddingEnd="@dimen/screen_horizontal_padding"
+            android:paddingTop="8dp"
+            android:paddingBottom="32dp">
 
             <com.google.android.material.card.MaterialCardView
-                android:id="@+id/cardStatus"
-                style="@style/Widget.Material3.CardView.Elevated"
+                android:id="@+id/card_status"
+                style="?attr/materialCardViewFilledStyle"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginBottom="20dp"
                 app:cardCornerRadius="@dimen/card_corner"
-                app:cardElevation="1dp"
-                app:strokeColor="?attr/colorOutlineVariant"
-                app:strokeWidth="1dp">
+                app:cardElevation="1dp">
 
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:gravity="center_vertical"
-                    android:orientation="horizontal"
+                    android:orientation="vertical"
                     android:padding="@dimen/card_inner_padding">
 
-                    <FrameLayout
-                        android:layout_width="@dimen/status_icon_inner"
-                        android:layout_height="@dimen/status_icon_inner">
-
-                        <androidx.appcompat.widget.AppCompatImageView
-                            android:id="@+id/imageStatus"
-                            android:layout_width="match_parent"
-                            android:layout_height="match_parent"
-                            android:contentDescription="@string/status_standby_title"
-                            app:srcCompat="@drawable/ic_status_standby"
-                            tools:ignore="ImageContrastCheck" />
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal">
 
                         <ProgressBar
-                            android:id="@+id/progressStatus"
-                            style="?android:attr/progressBarStyle"
-                            android:layout_width="match_parent"
-                            android:layout_height="match_parent"
-                            android:visibility="gone"
-                            android:contentDescription="@string/status_connecting_title"
+                            android:id="@+id/progress_status"
+                            android:layout_width="@dimen/status_icon_inner"
+                            android:layout_height="@dimen/status_icon_inner"
+                            android:indeterminateTint="?attr/colorSecondary"
+                            android:visibility="gone" />
+
+                        <ImageView
+                            android:id="@+id/image_status"
+                            android:layout_width="@dimen/status_icon_inner"
+                            android:layout_height="@dimen/status_icon_inner"
                             android:importantForAccessibility="yes"
-                            android:indeterminate="true"
-                            android:indeterminateTint="?attr/colorPrimary" />
-                    </FrameLayout>
-
-                    <LinearLayout
-                        android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_marginStart="12dp"
-                        android:layout_weight="1"
-                        android:orientation="vertical">
-
-                        <TextView
-                            android:id="@+id/textStatusTitle"
-                            android:layout_width="match_parent"
-                            android:layout_height="wrap_content"
-                            android:text="@string/status_standby_title"
-                            android:textAppearance="?attr/textAppearanceTitleMedium"
-                            android:textColor="?attr/colorOnSurface"
-                            tools:text="Not connected" />
-
-                        <TextView
-                            android:id="@+id/textStatusSubtitle"
-                            android:layout_width="match_parent"
-                            android:layout_height="wrap_content"
-                            android:layout_marginTop="2dp"
-                            android:text="@string/status_standby_subtitle"
-                            android:textAppearance="?attr/textAppearanceBodySmall"
-                            android:textColor="?attr/colorOnSurfaceVariant"
-                            tools:text="Standby." />
+                            android:src="@drawable/ic_status_standby" />
                     </LinearLayout>
+
+                    <TextView
+                        android:id="@+id/text_status_title"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="8dp"
+                        android:text="@string/status_standby_title"
+                        android:textAppearance="?attr/textAppearanceTitleLarge"
+                        android:textSize="24sp" />
+
+                    <TextView
+                        android:id="@+id/text_status_subtitle"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="4dp"
+                        android:text="@string/status_standby_subtitle"
+                        android:textAppearance="?attr/textAppearanceBodyLarge"
+                        android:textSize="18sp" />
+
+                    <TextView
+                        android:id="@+id/text_phase"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="8dp"
+                        android:visibility="gone"
+                        android:textAppearance="?attr/textAppearanceTitleSmall"
+                        android:textSize="18sp" />
                 </LinearLayout>
             </com.google.android.material.card.MaterialCardView>
-
-            <TextView
-                android:id="@+id/textPcHint"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginBottom="12dp"
-                android:paddingVertical="10dp"
-                android:paddingHorizontal="12dp"
-                android:background="?attr/colorSurfaceVariant"
-                android:text="@string/status_connected_pc_hint"
-                android:textAppearance="?attr/textAppearanceBodySmall"
-                android:textColor="?attr/colorOnSurfaceVariant"
-                android:visibility="gone" />
-
-            <com.google.android.material.textfield.TextInputLayout
-                android:id="@+id/inputLayoutRelayUrl"
-                style="@style/Widget.Material3.TextInputLayout.OutlinedBox"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:hint="@string/relay_url_hint">
-
-                <com.google.android.material.textfield.TextInputEditText
-                    android:id="@+id/inputRelayUrl"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:importantForAutofill="no"
-                    android:inputType="text|textNoSuggestions" />
-            </com.google.android.material.textfield.TextInputLayout>
-
-            <com.google.android.material.textfield.TextInputLayout
-                android:id="@+id/inputLayoutToken"
-                style="@style/Widget.Material3.TextInputLayout.OutlinedBox"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="8dp"
-                android:hint="@string/session_token_hint">
-
-                <com.google.android.material.textfield.TextInputEditText
-                    android:id="@+id/inputToken"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:importantForAutofill="no"
-                    android:inputType="textPassword" />
-            </com.google.android.material.textfield.TextInputLayout>
-
-            <TextView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="16dp"
-                android:text="@string/adbd_section_title"
-                android:textAppearance="?attr/textAppearanceTitleSmall"
-                android:textColor="?attr/colorOnSurface" />
-
-            <TextView
-                android:id="@+id/textAdbdGuide"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="8dp"
-                android:paddingVertical="10dp"
-                android:paddingHorizontal="12dp"
-                android:background="?attr/colorSurfaceVariant"
-                android:textAppearance="?attr/textAppearanceBodySmall"
-                android:textColor="?attr/colorOnSurfaceVariant"
-                tools:text="1) Turn on Wireless debugging…" />
-
-            <com.google.android.material.button.MaterialButton
-                android:id="@+id/buttonOpenWirelessDebugging"
-                style="@style/Widget.Material3.Button.TonalButton"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="10dp"
-                android:minHeight="48dp"
-                android:text="@string/adbd_open_wireless_settings" />
-
-            <TextView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="16dp"
-                android:text="@string/adbd_address_title"
-                android:textAppearance="?attr/textAppearanceTitleSmall"
-                android:textColor="?attr/colorOnSurface" />
-
-            <com.google.android.material.textfield.TextInputLayout
-                android:id="@+id/inputLayoutAdbdHost"
-                style="@style/Widget.Material3.TextInputLayout.OutlinedBox"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="8dp"
-                android:hint="@string/adbd_host_hint">
-
-                <com.google.android.material.textfield.TextInputEditText
-                    android:id="@+id/inputAdbdHost"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:importantForAutofill="no"
-                    android:inputType="text" />
-            </com.google.android.material.textfield.TextInputLayout>
-
-            <com.google.android.material.textfield.TextInputLayout
-                android:id="@+id/inputLayoutAdbdPort"
-                style="@style/Widget.Material3.TextInputLayout.OutlinedBox"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="8dp"
-                android:hint="@string/adbd_port_hint">
-
-                <com.google.android.material.textfield.TextInputEditText
-                    android:id="@+id/inputAdbdPort"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:importantForAutofill="no"
-                    android:inputType="number" />
-            </com.google.android.material.textfield.TextInputLayout>
 
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="20dp"
-                android:baselineAligned="false"
-                android:gravity="center_vertical"
+                android:layout_marginTop="16dp"
                 android:orientation="horizontal">
 
                 <com.google.android.material.button.MaterialButton
-                    android:id="@+id/buttonDisconnect"
-                    style="@style/Widget.Material3.Button.OutlinedButton"
+                    android:id="@+id/button_get_help"
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
                     android:layout_marginEnd="8dp"
                     android:layout_weight="1"
-                    android:minHeight="48dp"
-                    android:text="@string/disconnect" />
+                    android:paddingTop="20dp"
+                    android:paddingBottom="20dp"
+                    android:text="@string/action_get_help"
+                    android:textSize="20sp" />
 
                 <com.google.android.material.button.MaterialButton
-                    android:id="@+id/buttonConnect"
+                    android:id="@+id/button_stop"
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
+                    android:layout_marginStart="8dp"
                     android:layout_weight="1"
-                    android:minHeight="48dp"
-                    android:text="@string/connect" />
+                    android:paddingTop="20dp"
+                    android:paddingBottom="20dp"
+                    android:text="@string/action_stop"
+                    android:textSize="20sp" />
             </LinearLayout>
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/button_open_wireless_debugging"
+                style="@style/Widget.Material3.Button.OutlinedButton"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:text="@string/open_developer_options" />
+
+            <com.google.android.material.card.MaterialCardView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="16dp"
+                app:cardCornerRadius="@dimen/card_corner"
+                app:cardElevation="0dp"
+                app:strokeColor="?attr/colorOutlineVariant"
+                app:strokeWidth="@dimen/hairline">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:padding="@dimen/card_inner_padding">
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="@string/checklist_install_title"
+                        android:textAppearance="?attr/textAppearanceTitleMedium"
+                        android:textSize="20sp" />
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="4dp"
+                        android:text="@string/checklist_install_body"
+                        android:textAppearance="?attr/textAppearanceBodyLarge"
+                        android:textSize="17sp" />
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="16dp"
+                        android:text="@string/checklist_battery_title"
+                        android:textAppearance="?attr/textAppearanceTitleMedium"
+                        android:textSize="20sp" />
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="4dp"
+                        android:text="@string/checklist_battery_body"
+                        android:textAppearance="?attr/textAppearanceBodyLarge"
+                        android:textSize="17sp" />
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="16dp"
+                        android:text="@string/checklist_developer_title"
+                        android:textAppearance="?attr/textAppearanceTitleMedium"
+                        android:textSize="20sp" />
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="4dp"
+                        android:text="@string/checklist_developer_body"
+                        android:textAppearance="?attr/textAppearanceBodyLarge"
+                        android:textSize="17sp" />
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="16dp"
+                        android:text="@string/checklist_wireless_title"
+                        android:textAppearance="?attr/textAppearanceTitleMedium"
+                        android:textSize="20sp" />
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="4dp"
+                        android:text="@string/checklist_wireless_body"
+                        android:textAppearance="?attr/textAppearanceBodyLarge"
+                        android:textSize="17sp" />
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="16dp"
+                        android:text="@string/checklist_pair_title"
+                        android:textAppearance="?attr/textAppearanceTitleMedium"
+                        android:textSize="20sp" />
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="4dp"
+                        android:text="@string/checklist_pair_body"
+                        android:textAppearance="?attr/textAppearanceBodyLarge"
+                        android:textSize="17sp" />
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="16dp"
+                        android:text="@string/checklist_stay_title"
+                        android:textAppearance="?attr/textAppearanceTitleMedium"
+                        android:textSize="20sp" />
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="4dp"
+                        android:text="@string/checklist_stay_body"
+                        android:textAppearance="?attr/textAppearanceBodyLarge"
+                        android:textSize="17sp" />
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
         </LinearLayout>
     </androidx.core.widget.NestedScrollView>
-</LinearLayout>
+</androidx.coordinatorlayout.widget.CoordinatorLayout>
