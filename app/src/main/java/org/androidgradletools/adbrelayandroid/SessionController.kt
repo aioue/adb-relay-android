@@ -100,6 +100,10 @@ class SessionController(
     /**
      * Attach the oldest parked socket to `channelId`. Returns false when nothing is parked
      * (unsolicited OPEN — the caller then sends CLOSE and, as no DIAL_RESULT went out, `no_addr`).
+     *
+     * FIFO is safe by construction: the UK bridge holds one lock across DIAL → DIAL_RESULT →
+     * OPEN, so OPENs arrive in DIAL_RESULT order (voice-pipe-dev.py dial_lock, server plan §4
+     * one-accept-at-a-time). If the bridge ever relaxes that, this must attach by phase instead.
      */
     fun attach(channelId: Int): Boolean {
         val parkedPhase = synchronized(lock) { attachQueue.removeFirstOrNull() } ?: return false
@@ -182,7 +186,11 @@ class SessionController(
             try {
                 val input = socket.getInputStream()
                 while (!socket.isClosed) {
-                    val available = synchronized(lock) { parkedBufferCap - currentParkedBytes() }
+                    // Cap is per parked socket (§4: "Buffer bytes it receives, cap 64 KiB"),
+                    // not shared across the pair+connect overlap.
+                    val target0 = synchronized(lock) { parked.values.firstOrNull { it.socket === socket } }
+                        ?: break
+                    val available = parkedBufferCap - synchronized(lock) { target0.inboundBytes }
                     if (available <= 0) break
                     val n = input.read(buf, 0, minOf(buf.size, available))
                     if (n < 0) break
@@ -202,8 +210,6 @@ class SessionController(
             start()
         }
     }
-
-    private fun currentParkedBytes(): Int = parked.values.sumOf { it.inboundBytes }
 
     companion object {
         private const val LOG_TAG = "VoicePipe"

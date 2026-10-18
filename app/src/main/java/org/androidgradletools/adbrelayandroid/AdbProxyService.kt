@@ -472,7 +472,8 @@ class AdbProxyService : Service() {
 
         private const val INITIAL_RECONNECT_DELAY_MS = 1_000L
         private const val BACKOFF_BASE_MS = 2_000L
-        private const val BACKOFF_CAP_MS = 60_000L
+        /** §6: the phone reconnects "the same way" as the bridge, whose backoff caps at 15 s. */
+        private const val BACKOFF_CAP_MS = 15_000L
 
         fun start(context: Context) {
             val i = Intent(context, AdbProxyService::class.java)

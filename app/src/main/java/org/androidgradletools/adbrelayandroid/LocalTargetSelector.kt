@@ -32,20 +32,32 @@ class ConnectivityTargetSelector(private val context: Context) : LocalTargetSele
     override fun candidates(): List<Candidate> {
         val cm = context.applicationContext.getSystemService(ConnectivityManager::class.java)
             ?: return listOf(Candidate.LOOPBACK)
+        // §4 dial order: the ACTIVE non-VPN network's link addresses first —
+        // her home Wi-Fi. Fallback walks all internet-capable networks in case
+        // the active network is e.g. cellular while adbd's listener is on Wi-Fi.
         val link = mutableListOf<Candidate>()
+        val active: Network? = cm.activeNetwork
+        if (active != null) {
+            collectLinkAddresses(cm, active, link)
+        }
         for (network in cm.allNetworks) {
-            val caps = cm.getNetworkCapabilities(network) ?: continue
-            // A VPN's link addresses are the tunnel's, not adbd's; skip them.
-            if (caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN)) continue
-            if (!caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)) continue
-            val props: LinkProperties = cm.getLinkProperties(network) ?: continue
-            for (address in props.linkAddresses) {
-                val addr: InetAddress = address.address
-                if (addr is Inet4Address && !addr.isLinkLocalAddress && !addr.isLoopbackAddress) {
-                    link.add(Candidate(addr.hostAddress ?: continue, Candidate.VIA_LINK))
-                }
-            }
+            if (network == active) continue
+            collectLinkAddresses(cm, network, link)
         }
         return link + listOf(Candidate.LOOPBACK)
+    }
+
+    private fun collectLinkAddresses(cm: ConnectivityManager, network: Network, out: MutableList<Candidate>) {
+        val caps = cm.getNetworkCapabilities(network) ?: return
+        // A VPN's link addresses are the tunnel's, not adbd's; skip them.
+        if (caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN)) return
+        if (!caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)) return
+        val props: LinkProperties = cm.getLinkProperties(network) ?: return
+        for (address in props.linkAddresses) {
+            val addr: InetAddress = address.address
+            if (addr is Inet4Address && !addr.isLinkLocalAddress && !addr.isLoopbackAddress) {
+                out.add(Candidate(addr.hostAddress ?: continue, Candidate.VIA_LINK))
+            }
+        }
     }
 }

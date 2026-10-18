@@ -36,7 +36,7 @@ export JAVA_HOME=/path/to/jdk-11
 export ANDROID_HOME=$HOME/Library/Android/sdk   # example on macOS
 ./gradlew testDebugUnitTest          # mux/DIAL protocol tests (§12 row 1)
 ./gradlew assembleRelease \
-  -Pfamilyhelp.relayUrl=wss://<tunnel-hostname>/ws \
+  -Pfamilyhelp.relayUrl=wss://<tunnel-hostname>/ \
   -Pfamilyhelp.relayToken=<device-token>
 ```
 

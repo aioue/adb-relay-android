@@ -7,7 +7,7 @@ plugins {
 // Bake with: ./gradlew assembleRelease -Pfamilyhelp.relayUrl=wss://… -Pfamilyhelp.relayToken=…
 // The defaults are deliberately invalid so an unbaked build fails visibly instead of dialing nothing.
 val bakedRelayUrl: String = (project.findProperty("familyhelp.relayUrl") as String?)
-    ?: "wss://NOT-BAKED.invalid/ws"
+    ?: "wss://NOT-BAKED.invalid/"
 val bakedRelayToken: String = (project.findProperty("familyhelp.relayToken") as String?)
     ?: "NOT-BAKED"
 
