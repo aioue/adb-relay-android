@@ -1,6 +1,10 @@
 package org.androidgradletools.adbrelayandroid
 
 object ProxyRuntime {
+    const val PHASE_IDLE = "idle"
+    const val PHASE_PAIR = "pair"
+    const val PHASE_CONNECT = "connect"
+
     @Volatile
     var connected: Boolean = false
 
@@ -18,8 +22,4 @@ object ProxyRuntime {
     /** Last DIAL phase seen (pair / connect); drives the one-line status under the checklist. */
     @Volatile
     var phase: String = PHASE_IDLE
-
-    const val PHASE_IDLE = "idle"
-    const val PHASE_PAIR = "pair"
-    const val PHASE_CONNECT = "connect"
 }

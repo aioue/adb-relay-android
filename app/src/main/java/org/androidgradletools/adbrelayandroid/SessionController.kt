@@ -109,7 +109,7 @@ class SessionController(
             synchronized(p.socket) {
                 val out = p.socket.getOutputStream()
                 while (true) {
-                    val chunk = synchronized(lock) { p.inbound.pollFirst() } ?: break
+                    val chunk = synchronized(lock) { p.inbound.removeFirstOrNull() } ?: break
                     out.write(chunk)
                 }
                 out.flush()
@@ -149,7 +149,7 @@ class SessionController(
         for ((id, live) in synchronized(lock) { channels.entries.toList() }) {
             if (live.phase == phase) {
                 closeChannel(id)
-                sendFrame(MuxCodec.TYPE_CLOSE, id)
+                sendFrame(MuxCodec.TYPE_CLOSE, id, ByteArray(0))
             }
         }
     }
@@ -181,16 +181,17 @@ class SessionController(
             val buf = ByteArray(16 * 1024)
             try {
                 val input = socket.getInputStream()
-                outer@ while (!socket.isClosed) {
-                    var available = synchronized(lock) { parkedBufferCap - currentParkedBytes() }
+                while (!socket.isClosed) {
+                    val available = synchronized(lock) { parkedBufferCap - currentParkedBytes() }
                     if (available <= 0) break
                     val n = input.read(buf, 0, minOf(buf.size, available))
                     if (n < 0) break
                     if (n == 0) continue
+                    val target = synchronized(lock) { parked.values.firstOrNull { it.socket === socket } }
+                    if (target == null) break
                     synchronized(lock) {
-                        val p = parked.values.firstOrNull { it.socket === socket } ?: break@outer
-                        p.inbound.addLast(buf.copyOf(n))
-                        p.inboundBytes += n
+                        target.inbound.addLast(buf.copyOf(n))
+                        target.inboundBytes += n
                     }
                 }
             } catch (_: Exception) {

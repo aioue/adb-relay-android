@@ -27,7 +27,7 @@ data class Candidate(val host: String, val via: String) {
     }
 }
 
-class ConnectivityTargetSelector(context: Context) : LocalTargetSelector {
+class ConnectivityTargetSelector(private val context: Context) : LocalTargetSelector {
 
     override fun candidates(): List<Candidate> {
         val cm = context.applicationContext.getSystemService(ConnectivityManager::class.java)

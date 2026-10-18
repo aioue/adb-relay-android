@@ -6,6 +6,7 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.net.ConnectException
+import java.net.InetSocketAddress
 import java.net.ServerSocket
 import java.net.Socket
 import java.net.SocketTimeoutException
@@ -23,6 +24,25 @@ class SessionControllerTest {
             val json = String(last.third, Charsets.UTF_8)
             val match = Regex("\"error\":\"([a-z_]+)\"").find(json) ?: return null
             return match.groupValues[1]
+        }
+    }
+
+    /**
+     * Real loopback dial: the controller "dials" the client side (this is the socket it parks),
+     * and [accepted] collects the adbd-side of each pair for inspection. A pure `server.accept()`
+     * fake deadlocks — handleDial blocks waiting for a client that never comes.
+     */
+    private class FakeAdbd(val server: ServerSocket = ServerSocket(0)) {
+        val accepted = mutableListOf<Socket>()
+        val clients = mutableListOf<Socket>()
+
+        fun connect(): Socket {
+            val client = Socket()
+            client.tcpNoDelay = true
+            client.connect(InetSocketAddress("127.0.0.1", server.localPort), 2000)
+            clients.add(client)
+            accepted.add(server.accept())
+            return client
         }
     }
 
@@ -56,31 +76,33 @@ class SessionControllerTest {
 
     @Test
     fun timeoutThenSuccessUsesFirstWorkingCandidateVia() {
-        val server = ServerSocket(0)
+        val fake = FakeAdbd()
         var calls = 0
         val sink = FrameSink()
         val c = controller(
             sink,
             listOf(
-                Candidate("203.0.113.9", Candidate.VIA_LINK), // TEST-NET-3, will time out
+                Candidate("203.0.113.9", Candidate.VIA_LINK), // TEST-NET-3, fake dial times out
                 Candidate("127.0.0.1", Candidate.VIA_LOOPBACK),
             ),
         ) { host, _, timeout ->
             calls++
             if (host == "203.0.113.9") throw SocketTimeoutException("t")
-            server.accept().also { server.close() }
+            if (timeout <= 0) throw SocketTimeoutException("t")
+            fake.connect()
         }
-        c.handleDial(dialPayload("connect", server.localPort))
+        c.handleDial(dialPayload("connect", fake.server.localPort))
         assertEquals(2, calls)
         val result = sink.dialResults().single().third.decodeToString()
         assertTrue(result.contains("\"ok\":true"))
         assertTrue(result.contains("\"via\":\"loopback\""))
         // Parked socket attaches on the next OPEN.
         assertTrue(c.attach(1))
-        val sock = c.socketFor(1)
-        assertTrue(sock != null && !sock!!.isClosed)
+        val sock = c.socketFor(1) ?: throw AssertionError("channel 1 socket missing after attach")
+        assertTrue(!sock.isClosed)
         c.closeChannel(1)
         assertTrue(sock.isClosed)
+        fake.server.close()
     }
 
     @Test
@@ -114,67 +136,56 @@ class SessionControllerTest {
 
     @Test
     fun redialClosesPreviousParkedSocketForPhase() {
-        val server = ServerSocket(0)
-        val accepted = mutableListOf<Socket>()
+        val fake = FakeAdbd()
         val sink = FrameSink()
-        val c = controller(
-            sink,
-            listOf(Candidate.LOOPBACK),
-        ) { _, _, _ -> server.accept().also { accepted.add(it); if (accepted.size == 2) server.close() } }
-        c.handleDial(dialPayload("pair", server.localPort))
-        val first = accepted[0]
+        val c = controller(sink, listOf(Candidate.LOOPBACK)) { _, _, _ -> fake.connect() }
+        c.handleDial(dialPayload("pair", fake.server.localPort))
+        val first = fake.clients[0]
         assertFalse(first.isClosed)
         // Re-arm: a new DIAL for the same phase must close the parked socket, not stack them.
-        c.handleDial(dialPayload("pair", server.localPort))
+        c.handleDial(dialPayload("pair", fake.server.localPort))
         assertTrue(first.isClosed)
-        assertEquals(2, accepted.size)
+        assertEquals(2, fake.clients.size)
         assertTrue(c.attach(5))
+        assertEquals(fake.clients[1], c.socketFor(5))
         c.closeChannel(5)
+        fake.server.close()
     }
 
     @Test
     fun attachQueueIsFifoAcrossPhases() {
-        val server = ServerSocket(0)
-        val accepted = mutableListOf<Socket>()
+        val fake = FakeAdbd()
         val sink = FrameSink()
-        val c = controller(
-            sink,
-            listOf(Candidate.LOOPBACK),
-        ) { _, _, _ -> server.accept().also { accepted.add(it) } }
-        c.handleDial(dialPayload("pair", server.localPort))
-        c.handleDial(dialPayload("connect", server.localPort))
+        val c = controller(sink, listOf(Candidate.LOOPBACK)) { _, _, _ -> fake.connect() }
+        c.handleDial(dialPayload("pair", fake.server.localPort))
+        c.handleDial(dialPayload("connect", fake.server.localPort))
         assertTrue(c.attach(1))
         assertTrue(c.attach(2))
         assertEquals("pair", c.phaseOf(1))
         assertEquals("connect", c.phaseOf(2))
         assertFalse(c.attach(3)) // nothing left parked
         c.closeAll()
+        fake.server.close()
     }
 
     @Test
     fun closeByPhaseClosesItsChannelOnly() {
-        val server = ServerSocket(0)
-        val accepted = mutableListOf<Socket>()
+        val fake = FakeAdbd()
         val sink = FrameSink()
-        val c = controller(
-            sink,
-            listOf(Candidate.LOOPBACK),
-        ) { _, _, _ -> server.accept().also { accepted.add(it) } }
-        c.handleDial(dialPayload("pair", server.localPort))
-        c.handleDial(dialPayload("connect", server.localPort))
+        val c = controller(sink, listOf(Candidate.LOOPBACK)) { _, _, _ -> fake.connect() }
+        c.handleDial(dialPayload("pair", fake.server.localPort))
+        c.handleDial(dialPayload("connect", fake.server.localPort))
         c.attach(1)
         c.attach(2)
         val sinkCountBefore = sink.frames.size
         c.closeByPhase("pair")
-        assertTrue(accepted[0].isClosed)
-        assertFalse(accepted[1].isClosed)
+        assertTrue(fake.clients[0].isClosed)
+        assertFalse(fake.clients[1].isClosed)
         assertNull(c.socketFor(1))
         // CLOSE frame went out for channel 1 only.
         val closes = sink.frames.drop(sinkCountBefore).filter { it.first == MuxCodec.TYPE_CLOSE }
         assertEquals(listOf(1), closes.map { it.second })
         c.closeAll()
+        fake.server.close()
     }
 }
-
-/** Local-selector shim so the test JVM needs no Android ConnectivityManager: the controller takes
- * [LocalTargetSelector] as a constructor parameter, which is the seam these tests use directly. */
