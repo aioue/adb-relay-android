@@ -41,6 +41,7 @@
     <string name="notification_reconnecting">Reconnecting (attempt %1$d)…</string>
     <string name="tunnel_relay_reconnecting">Connection lost. Retrying…</string>
     <string name="error_service_missing_required">Help session could not start (build missing relay settings).</string>
+    <string name="error_service_bad_relay_url">Help session could not start (relay URL invalid).</string>
     <string name="error_ws_tls_mismatch_plain_relay">Unable to parse TLS packet header — relay likely has no TLS.</string>
     <string name="error_ws_cleartext_blocked">Cleartext blocked — the relay must be reached over https/wss.</string>
     <string name="disconnect">Stop</string>

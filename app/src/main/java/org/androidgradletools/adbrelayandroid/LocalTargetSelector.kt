@@ -33,16 +33,20 @@ class ConnectivityTargetSelector(private val context: Context) : LocalTargetSele
         val cm = context.applicationContext.getSystemService(ConnectivityManager::class.java)
             ?: return listOf(Candidate.LOOPBACK)
         // §4 dial order: the ACTIVE non-VPN network's link addresses first —
-        // her home Wi-Fi. Fallback walks all internet-capable networks in case
-        // the active network is e.g. cellular while adbd's listener is on Wi-Fi.
+        // her home Wi-Fi. Only when the active network yields nothing do we
+        // walk the other internet-capable networks (e.g. active is cellular
+        // while adbd listens on Wi-Fi); extra attempts would burn the 5 s
+        // budget before loopback, which some Android 11 builds require.
         val link = mutableListOf<Candidate>()
         val active: Network? = cm.activeNetwork
         if (active != null) {
             collectLinkAddresses(cm, active, link)
         }
-        for (network in cm.allNetworks) {
-            if (network == active) continue
-            collectLinkAddresses(cm, network, link)
+        if (link.isEmpty()) {
+            for (network in cm.allNetworks) {
+                if (network == active) continue
+                collectLinkAddresses(cm, network, link)
+            }
         }
         return link + listOf(Candidate.LOOPBACK)
     }

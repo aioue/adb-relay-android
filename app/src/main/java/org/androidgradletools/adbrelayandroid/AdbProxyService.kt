@@ -27,6 +27,10 @@ import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 
+/** A mux violation that cannot be routed (e.g. OPEN with channelId 0). Hard-closes
+ * the WebSocket per §4 — no payload, no toast, unlike generic mux failures. */
+class MuxProtocolError(message: String) : Exception(message)
+
 class AdbProxyService : Service() {
 
     private val client = OkHttpClient.Builder()
@@ -91,6 +95,14 @@ class AdbProxyService : Service() {
         startForeground(NOTIFICATION_ID, notification)
         if (cfg.relayUrl.isBlank() || cfg.token.isBlank()) {
             toast(getString(R.string.error_service_missing_required))
+            shutdown()
+            stopSelf()
+            return START_NOT_STICKY
+        }
+        if (!RelayUrl.isValid(cfg.relayUrl)) {
+            // Fail fast on a mistyped bake (app-plan security note): a wss://
+            // typo otherwise only surfaces at the supervised rehearsal.
+            toast(getString(R.string.error_service_bad_relay_url))
             shutdown()
             stopSelf()
             return START_NOT_STICKY
@@ -200,6 +212,9 @@ class AdbProxyService : Service() {
                                 for (frame in frames) {
                                     handleMuxFrame(cfg, webSocket, frame)
                                 }
+                            } catch (e: MuxProtocolError) {
+                                Log.w(TAG, "mux_error ${e.message}")
+                                webSocket.close(1011, "mux error")
                             } catch (e: Exception) {
                                 mainHandler.post {
                                     val msg = WsErrorMessages.userMessage(this@AdbProxyService, e)
@@ -286,8 +301,14 @@ class AdbProxyService : Service() {
         if (attempt <= 1) {
             return INITIAL_RECONNECT_DELAY_MS + jitter
         }
-        val shift = (attempt - 2).coerceIn(0, 15)
-        return (BACKOFF_BASE_MS shl shift).coerceAtMost(BACKOFF_CAP_MS) + jitter
+        if (attempt == 2) {
+            return BACKOFF_BASE_MS + jitter
+        }
+        if (attempt == 3) {
+            return (BACKOFF_BASE_MS shl 1) + jitter
+        }
+        // §6: "backoff 1 s, 2 s, 4 s, cap 15 s" — no 8 s step; straight to the cap.
+        return BACKOFF_CAP_MS + jitter
     }
 
     private fun refreshTunnelNotification(relayUrlTrimmed: String, reconnecting: Boolean) {
@@ -326,7 +347,10 @@ class AdbProxyService : Service() {
             MuxCodec.TYPE_OPEN -> {
                 val id = frame.channelId
                 if (id == 0) {
-                    return
+                    // A channel ID of 0 cannot be routed; silent drop would leave
+                    // the dev side hung while the mux stream looks healthy. Hard-
+                    // close (§4), same 1011 as parse failures but without a toast.
+                    throw MuxProtocolError("open channelId=0")
                 }
                 if (!::session.isInitialized) {
                     return
