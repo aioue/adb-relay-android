@@ -31,6 +31,14 @@ import java.util.concurrent.atomic.AtomicBoolean
  * the WebSocket per §4 — no payload, no toast, unlike generic mux failures. */
 class MuxProtocolError(message: String) : Exception(message)
 
+/** §4: OPEN must carry a routable channel ID — 0 cannot be routed, and a silent
+ * drop would leave the dev side hung while the mux stream looks healthy. */
+internal fun requireRoutableOpen(channelId: Int) {
+    if (channelId == 0) {
+        throw MuxProtocolError("open channelId=0")
+    }
+}
+
 class AdbProxyService : Service() {
 
     private val client = OkHttpClient.Builder()
@@ -346,12 +354,9 @@ class AdbProxyService : Service() {
             }
             MuxCodec.TYPE_OPEN -> {
                 val id = frame.channelId
-                if (id == 0) {
-                    // A channel ID of 0 cannot be routed; silent drop would leave
-                    // the dev side hung while the mux stream looks healthy. Hard-
-                    // close (§4), same 1011 as parse failures but without a toast.
-                    throw MuxProtocolError("open channelId=0")
-                }
+                // Hard-close on an unroutable channel ID (§4) — same 1011 as
+                // parse failures but without a toast.
+                requireRoutableOpen(id)
                 if (!::session.isInitialized) {
                     return
                 }
